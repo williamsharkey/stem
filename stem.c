@@ -3,33 +3,40 @@
 #include<dirent.h>
 #include<string.h>
 #include<stdlib.h>
+#include<stdbool.h>
 
 #define MRead(name, n) \
   unsigned char name[n];\
   uint32_t s ## name;\
   fread(&name, n, 1, stream);\
-  printf("     %16s : ", #name);\
+  if (verbose){\
+  printf("     %16s : ", #name);}\
   for(int a=0;a<6;a++){\
+    if (verbose){\
     if (a<n){\
       printf("%02x ",name[a]);\
     } else {\
       printf("   ");\
-    }\
+    }}\
   }\
-  printf(" ");\
+  if (verbose){\
+  printf(" ");}\
   s ## name=0;\
   for(int a=0;a<6;a++){\
     if (a<n) {\
       s ## name =  s ## name * 16 * 16 + name[a];\
+      if (verbose){\
       if (name[a]>=32){\
         printf(" %1c ",name[a]);\
       } else {\
         printf("⌞ ⌟");\
-      }\
+      }}\
     } else {\
-      printf("   ");\
+      if (verbose){\
+      printf("   ");}\
     }\
   }\
+  if (verbose)\
   printf(" %10d\n",s ## name);\
 
 typedef struct AIFF { 
@@ -46,7 +53,7 @@ typedef struct STEM {
   
 
 void readAiff(FILE * stream, AIFF *aiff){
-  
+  bool verbose = false;
   MRead(ckID,4);
   MRead(fileSize,4);
   MRead(formType,4);
@@ -66,7 +73,7 @@ void readAiff(FILE * stream, AIFF *aiff){
   aiff->sampleFrames=ssampleFrames;
   aiff->samples = malloc( sizeof(uint16_t) * aiff->sampleFrames * 2); 
   fread(aiff->samples, sizeof(uint16_t), aiff->sampleFrames*2, stream);
-  printf("%d\n", aiff->sampleFrames);
+  printf("  sample frames: %d\n", aiff->sampleFrames);
   return;
 }
 
@@ -104,29 +111,27 @@ void openmulti (char *dirname, STEM *stem)
         if (!strstr(dir->d_name, ".aiff"))
           continue;
 
-        printf("%s\n", dir->d_name);
         stream = fopen (dir->d_name, "r");
         if (stream == NULL) 
             continue;
-        //struct aiff sndFile;
         strcpy(stem->aiffs[i].name,dir->d_name);
         readAiff(stream,&stem->aiffs[i]);
         if (stem->aiffs[i].sampleFrames>maxS){
           maxS=stem->aiffs[i].sampleFrames;
         }
-        printf(" %10d\n\n", stem->aiffs[i].sampleFrames);
+        printf("  %24s   sample frames: %10d\n\n", stem->aiffs[i].name, stem->aiffs[i].sampleFrames);
         fclose(stream);
         i++;
       }
       closedir(d);
     }
-    printf(" max = %10d\n",maxS );
+    printf("  max sample frames: %10d\n",maxS );
     stem->maxSampleFrames = maxS;
     
 }
 
 void writeChars(char *s, size_t n, FILE *stream){
-  printf("writing %s, size:%d\n",s,(int)n );
+  //printf("writing %s, size:%d\n",s,(int)n );
   fwrite(s, sizeof(char), n, stream);
 }
 
@@ -199,36 +204,26 @@ void write(STEM *stem, int loops){
       min=measureRight;
   }
 
-  printf("INT16_MAX %d\n", INT16_MAX );
+  
   float scale = (float)INT16_MAX / (float)max;
   float scale2 = (float)INT16_MIN / (float)min;
 
-  printf("max value %d\n",max);
-
-  printf("scale %f\n", scale);
-
-  printf("min value %d\n",min);
-
-  printf("scale2 %f\n", scale2);
+  
 
   if (scale2<scale){
     scale = scale2;
   }
 
-  int32_t test = scale * max;
-
-  printf("test %d\n", test);
-
-  int16_t test2 = test;
-
-  printf("test2 %d\n", test2);
-
+  if (scale>1){
+    scale=1;
+    
+  } else{
+    printf("  output will be normalized\n  signal will be multiplied by %f to prevent clipping.", scale);
+  }
 
   for(i=0; i<stem->maxSampleFrames*loops;i++){
     left32=0;
     right32=0;
-    //left=0;
-    //right=0;
     for(j=0; j<stem->n;j++){
       uint16_t leftBE= stem->aiffs[j].samples[2*(i%stem->aiffs[j].sampleFrames)];
       uint16_t rightBE= stem->aiffs[j].samples[1+2*(i%stem->aiffs[j].sampleFrames)];
@@ -236,9 +231,6 @@ void write(STEM *stem, int loops){
       int16_t lFull= (int16_t)((leftBE>>8) | (leftBE<<8));
       int16_t rFull= (int16_t)((rightBE>>8) | (rightBE<<8));
 
-      //left32 += lFull;//*scale;
-      //right32 += rFull;//*scale;
-      //float scale = 0.999;
       if (scale<1){
         left32+=lFull*scale;
         right32+=rFull*scale;  
@@ -267,7 +259,13 @@ int main(){
   
   STEM stem;
   openmulti(".", &stem);
-  write(&stem,4);
+  if (stem.maxSampleFrames == 0){
+    printf("  Nothing to output.\n");
+  } else{
+    printf("  Writing to out.aiff\n");
+    write(&stem,4);  
+  }
+  
   //printf("%s\n", stem.aiffs[0].name);
    
   return(0);
